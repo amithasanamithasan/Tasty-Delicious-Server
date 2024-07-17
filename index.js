@@ -4,6 +4,15 @@ const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const app = express();
+// mailgun email send 
+const formData = require('form-data');
+const Mailgun = require('mailgun.js');
+const mailgun = new Mailgun(formData);
+// different send email mailgun make client 
+const mg = mailgun.client({
+  username: 'api',
+  key: process.env.MAIL_GUN_API_KEY,
+});
 
 const port = process.env.PORT || 5000;
 
@@ -36,6 +45,7 @@ async function run() {
     const reviewsCollection = client.db("restaurantDb").collection("reviews");
     const cartCollection = client.db("restaurantDb").collection("carts");
     const paymentCollection = client.db("restaurantDb").collection("payments");
+    const reservationCollection = client.db("restaurantDb").collection("reservation");
 // jwt releted api
 // Create A JWT Token And Save It On Local Storage
 app.post('/jwt', async(req,res)=>{
@@ -174,31 +184,60 @@ app.post ('/create-payment-intent', async (req, res) => {
   })
   });
   // payment History
-  app.get('/payments/:email', verifyToken, async (req,res)=>{
-    const query={ email: req.params.email }
-    if(req.params.email !== req.decoded.email){
-      return res.status(403).send({massage:'forbidden access'});
-    }
-    const result= await paymentCollection.find().toArray()
-    res.send(result)
+  // app.get('/payments/:email', verifyToken, async (req,res)=>{
+  //   const query={ email: req.params.email }
+  //   if(req.params.email !== req.decoded.email){
+  //     return res.status(403).send({massage:'forbidden access'});
+  //   }
+  //   const result= await paymentCollection.find().toArray()
+  //   res.send(result)
 
+  // });
+  app.get('/payments/:email', verifyToken, async (req, res) => {
+    const query = { email: req.params.email }
+    if (req.params.email !== req.decoded.email) {
+      return res.status(403).send({ message: 'forbidden access' });
+    }
+    const result = await paymentCollection.find(query).toArray();
+    res.send(result);
   })
 
   // payment cart in database
-  app.post('/payments', verifyToken,verifyAdmin, async (req,res)=>{
-    const payment= req.body;
-    const paymentResult=await paymentCollection.insertOne(payment);
-    // carefully delete each item from cart
-    console.log('payment info',payment);
-    const query ={_id: 
-      {
-      $in:payment.cartIds.map(id =>  new ObjectId(id))
-    }};
-  const deleteResult= await cartCollection.deleteMany(query);
-    res.send({paymentResult ,deleteResult});
+  app.post('/payments', async (req, res) => {
+    const payment = req.body;
+    const paymentResult = await paymentCollection.insertOne(payment);
+
+    //  carefully delete each item from the cart
+    console.log('payment info', payment);
+    const query = {
+      _id: {
+        $in:payment.cartIds.map(id => new ObjectId(id))
+      }
+    };
+
+    const deleteResult = await cartCollection.deleteMany(query);
+    // send user email payment have successfully email confirmmation
+
+    mg.messages
+    .create(process.env.MAIL_SENDING_DOMAIN, {
+      from: "Mailgun Sandbox <postmaster@sandboxbdfffae822db40f6b0ccc96ae1cb28f3.mailgun.org>",
+      to: ["tanshasan01993790088@gmail.com"],
+      subject: "testy and delicious",
+      text: "Testing some Mailgun awesomness!",
+      html: `
+        <div>
+          <h2>Thank you for your order</h2>
+          <h4>Your Transaction Id: <strong>${payment.transactionId}</strong></h4>
+          <p>We would like to get your feedback about the food</p>
+        </div>
+      `
+    })
+    .then(msg => console.log(msg)) // logs response data
+    .catch(err => console.log(err)); // logs any error`;
 
 
-  });
+    res.send({ paymentResult, deleteResult });
+  })
   // Create Admin Dashboard Stats Api
 // adminHome dashboard all customer total revenue total customar total products total order
 app.get('/admin-stats',  async (req, res) => {
@@ -291,7 +330,15 @@ app.get('/reviews',async (req,res)=>{
     res.send(result);
 })
 
+// userdashboard reservation 
+app.post('/reservation',async(req,res)=>{
+  const reservationbody =req.body;
+  const result=await reservationCollection.insertOne(reservationbody);
+  console.log('data',result);
+   res.send(result);
 
+
+})
 
 
 // user stats
